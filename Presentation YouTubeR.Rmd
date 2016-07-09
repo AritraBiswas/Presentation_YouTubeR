@@ -1,0 +1,691 @@
+---
+title: "Presentation YouTubeR"
+author: "Aritra Biswas"
+date: "July 9, 2016"
+output: html_document
+---
+
+```{r}
+tryTolower <- function(x){
+  # return NA when there is an error
+  y <- NA
+  # tryCatch error
+  try_error <- tryCatch(tolower(x), error = function(e) e)
+  # if not an error
+  if (!inherits(try_error, 'error'))
+    y <- tolower(x)
+  return(y)
+}
+trim_df<-function(df){
+  df<-select(df,
+             -c(kind,
+                etag,
+                pageInfo.totalResults,
+                pageInfo.resultsPerPage,
+                items.kind,
+                items.snippet.videoId,
+                items.snippet.canReply,
+                items.snippet.isPublic,
+                items.replies.comments,
+                snippet.canRate,
+                items.snippet.topLevelComment.kind))
+
+  #authorDisplayName
+  d<-unlist(select(df,ends_with("authorDisplayName")))
+  d<-d[!is.na(d)]
+  if(length(d)==dim(df)[1]){
+  df<-select(df,-ends_with("authorDisplayName"))
+  df$authorDisplayName<-d}
+
+  #authorProfileImageUrl
+  d<-unlist(select(df,ends_with("authorProfileImageUrl")))
+  d<-d[!is.na(d)]
+  if(length(d)==dim(df)[1]){
+  df<-select(df,-ends_with("authorProfileImageUrl"))
+  df$authorProfileImageUrl<-d}
+
+  #authorChannelUrl
+  d<-unlist(select(df,ends_with("authorChannelUrl")))
+  d<-d[!is.na(d)]
+  if(length(d)==dim(df)[1]){
+  df<-select(df,-ends_with("authorChannelUrl"))
+  df$authorChannelUrl<-d}
+
+  #textDisplay
+  d<-unlist(select(df,ends_with("textDisplay")))
+  d<-d[!is.na(d)]
+  if(length(d)==dim(df)[1]){
+  df<-select(df,-ends_with("textDisplay"))
+  df$textDisplay<-d}
+
+  #videoId
+  d<-unlist(select(df,ends_with("videoId")))
+  d<-d[!is.na(d)]
+  if(length(d)==dim(df)[1]){
+  df<-select(df,-ends_with("videoId"))
+  df$videoId<-d}
+
+  #likeCount
+  d<-unlist(select(df,ends_with("likeCount")))
+  d<-d[!is.na(d)]
+  df<-select(df,-ends_with("likeCount"))
+  df$likeCount<-d
+
+  #publishedAt
+  d<-unlist(select(df,ends_with("publishedAt")))
+  d<-d[!is.na(d)]
+  if(length(d)==dim(df)[1]){
+  df<-select(df,-ends_with("publishedAt"))
+  df$publishedAt<-d}
+
+  #updatedAt
+  d<-unlist(select(df,ends_with("updatedAt")))
+  d<-d[!is.na(d)]
+  if(length(d)==dim(df)[1]){
+  df<-select(df,-ends_with("updatedAt"))
+  df$updatedAt<-d}
+
+  #canRate
+  d<-unlist(select(df,ends_with("canRate")))
+  d<-d[!is.na(d)]
+  if(length(d)==dim(df)[1]){
+  df<-select(df,-ends_with("canRate"))
+  df$canRate<-d}
+
+  #viewerRating
+  d<-unlist(select(df,ends_with("viewerRating")))
+  d<-d[!is.na(d)]
+  if(length(d)==dim(df)[1]){
+  df<-select(df,-ends_with("viewerRating"))
+  df$viewerRating<-d}
+
+  return(df)
+
+}
+
+rename_colnames<-function(df){
+  names(df) <- gsub("\\.","_", names(df) )
+  names(df) <- gsub("pageInfo_","", names(df) )
+  names(df) <- gsub("items_snippet_","", names(df) )
+  names(df) <- gsub("items_contentdetails_","", names(df) )
+  names(df) <- gsub("items_statistics_","", names(df) )
+  names(df)<- tolower(names(df))
+  return(df)
+}
+minimal_df<-function(df){
+  df1<-trim_df(df)
+  df2<-dplyr::select(df1,matches("totalReplyCount|authorChannelId.value|authorDisplayName|textDisplay|likeCount|publishedAt"))
+  return(df2)
+}
+get_videoids_single_playlist<- function(uploads, key){
+  nextPageToken <- ""
+  i<-1;
+  repeat{
+    url <- paste0("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&pageToken=",
+                  sprintf("%s", nextPageToken),
+                  "&playlistId=",
+                  sprintf("%s", unlist(uploads)),
+                  "&key=",
+                  sprintf("%s", key))
+    df1<-httr::GET(paste0(url))
+    df2<-httr::content(df1, "text")
+    if(i>1){
+      df3<- dplyr::tbl_df(dplyr::bind_rows(data.frame(jsonlite::fromJSON(df2, flatten = TRUE)),df3))}
+    if(i==1){
+      df3 <- dplyr::tbl_df(data.frame(jsonlite::fromJSON(df2, flatten = TRUE)))
+    }
+    if(unique(df3$pageInfo.totalResults)>50){
+      nextPageToken <- as.character(df3$nextPageToken[1])
+      if(is.na(nextPageToken)==TRUE)
+        break;
+    }else{
+      break;
+    }
+
+    i=i+1
+  }
+  #df<-dplyr::mutate(df,items.snippet.publishedAt=lubridate::ymd_hms(items.snippet.publishedAt))
+  return(df3)
+}
+get_videoids_multiple_playlists<- function(getplaylist_df, key){
+  i<-1;
+  while(i<dim(getplaylist_df)[1]){
+    if(i==1){
+      df0<-get_videoids_single_playlist(getplaylist_df$items.id[i],key)
+    }else{
+      df<-get_videoids_single_playlist(getplaylist_df$items.id[i],key)
+      df0<-dplyr::bind_rows(df0,df)
+    }
+    print(dim(getplaylist_df)[1]-i)
+    print("loops remains")
+    i=i+1
+  }
+  df0<-dplyr::filter (df0,!duplicated(items.snippet.resourceId.videoId))
+  return(df0)
+}
+get_video_data <- function(videoId, key){
+  #videoId<-"3bf0cvuZiCk"
+  url <- paste0("https://www.googleapis.com/youtube/v3/videos?part=snippet%2Cstatistics%2CcontentDetails&id=",
+                sprintf("%s",videoId),
+                "&maxResults=50&key=",
+                sprintf("%s", key))
+  df1 <- httr::GET(paste0(url))
+  df2 <- httr::content(df1, "text")
+  df <- jsonlite::fromJSON(df2, flatten = TRUE)
+  if(df$pageInfo$totalResults!=0){
+    df<-dplyr::tbl_df(data.frame(df))
+  }else{
+    df<-dplyr::tbl_df(data.frame())
+  }
+  #df<-dplyr::mutate(df,items.snippet.publishedAt=lubridate::ymd_hms(items.snippet.publishedAt))
+  #rm(df1,df2)
+  return(df)
+}
+get_playlists<-function(channelid,key){
+  nextPageToken=""
+  i=1;
+  repeat{
+    url <- unique(paste0("https://www.googleapis.com/youtube/v3/playlists?part=snippet&channelId=",
+                         sprintf("%s", channelid),
+                         "&key=",
+                         sprintf("%s", key),
+                         "&pageToken=",
+                         sprintf("%s", nextPageToken)))
+    df1<-httr::GET(paste0(url))
+    df2<-httr::content(df1, "text")
+    if(i>1){
+      df3<- dplyr::tbl_df(dplyr::bind_rows(data.frame(jsonlite::fromJSON(df2, flatten = TRUE)),df3))}
+    if(i==1){
+      df3 <- dplyr::tbl_df(data.frame(jsonlite::fromJSON(df2, flatten = TRUE)))
+    }
+    nextPageToken <- as.character(df3$nextPageToken[1])
+    if(is.na(nextPageToken)==TRUE)
+      break;
+    i=i+1
+  }
+  return(df3)
+}
+get_playlists<-function(channelid,key){
+  nextPageToken=""
+  i=1;
+  repeat{
+    url <- unique(paste0("https://www.googleapis.com/youtube/v3/playlists?part=snippet&channelId=",
+                         sprintf("%s", channelid),
+                         "&key=",
+                         sprintf("%s", key),
+                         "&pageToken=",
+                         sprintf("%s", nextPageToken)))
+    df1<-httr::GET(paste0(url))
+    df2<-httr::content(df1, "text")
+    if(i>1){
+      df3<- dplyr::tbl_df(dplyr::bind_rows(data.frame(jsonlite::fromJSON(df2, flatten = TRUE)),df3))}
+    if(i==1){
+      df3 <- dplyr::tbl_df(data.frame(jsonlite::fromJSON(df2, flatten = TRUE)))
+    }
+    nextPageToken <- as.character(df3$nextPageToken[1])
+    if(is.na(nextPageToken)==TRUE)
+      break;
+    i=i+1
+  }
+  return(df3)
+}
+get_language<-function(df){
+  df$language <- textcat::textcat(gcd$textDisplay)
+  return(df)
+}
+get_gender<-function(df,col,split,sepby,method){
+  names(df)[names(df) == paste(col)] <- 'name'
+  #convert Non_ASCII from the name coloumn
+  df$name<-stringi::stri_trans_general(df$name, "en-ascii")
+  #removing non-ascii charecter
+  df$name<-gsub("[^[:alpha:][:space:]]*", "", df$name)
+  #removing whitespace
+  df$name<-tm::stripWhitespace(df$name)
+  if(split=="TRUE"){
+    df<-tidyr::separate(df,name, into = c("first", "last"), sep = paste(sepby),remove=F);
+  }else{
+    names(df)[names(df) == 'name'] <- 'first'
+  }
+  first<-df$first
+  gender<-gender::gender(first, method = paste(method))
+  names(gender)[names(gender) == 'name'] <- 'first'
+  gender<-dplyr::filter (gender,!duplicated(first))
+  gender<-dplyr::filter(gender,gender!="NA")
+  df<-merge(x = df, y = gender, by = "first", all.x = TRUE)
+  return(df)
+}
+
+get_fbshare <- function(videoId)
+{
+  fqlQuery <- "select share_count,like_count,comment_count from link_stat where url=\""
+  url <- "https://www.youtube.com/watch?v="
+  url <- paste(url, videoId, sep = "")
+  queryUrl <- paste0("http://graph.facebook.com/fql?q=", fqlQuery, url, "\"")
+  lookUp <- URLencode(queryUrl)
+  rd <- readLines(lookUp, warn = "F")
+  data <- rjson::fromJSON(rd)
+  data <- as.data.frame(data)
+  names(data) <- c("ShareCount", "LikeCount", "CommentCount")
+  data$ShareCount <- as.numeric(as.character(data$ShareCount))
+  data$LikeCount <- as.numeric(as.character(data$LikeCount))
+  data$CommentCount <- as.numeric(as.character(data$CommentCount))
+  data<-data.frame(data)
+  data<-dplyr::tbl_df(data)
+  return(data)
+}
+
+get_comments<-function(videoId,key,nextPageToken=""){
+  nextPageToken=""
+  i=1;
+  repeat{
+    url <- unique(paste0("https://www.googleapis.com/youtube/v3/commentThreads?part=snippet%2Creplies&maxResults=100&pageToken=",
+                         sprintf("%s", nextPageToken),
+                         "&videoId=",
+                         sprintf("%s", videoId),
+                         "&key=",
+                         sprintf("%s", key)))
+    df1<-httr::GET(paste0(url))
+    df2<-httr::content(df1, "text")
+    if(i>1){
+      df3<- dplyr::tbl_df(dplyr::bind_rows(data.frame(jsonlite::fromJSON(df2, flatten = TRUE)),df3))}
+    if(i==1){
+      df3 <- dplyr::tbl_df(data.frame(jsonlite::fromJSON(df2, flatten = TRUE)))
+    }
+    nextPageToken <- as.character(df3$nextPageToken[1])
+    if(is.na(nextPageToken)==TRUE)
+      break;
+    i=i+1
+  }
+  #df4<-dplyr::mutate(df3,publishedAt=lubridate::ymd_hms(items.snippet.topLevelComment.snippet.publishedAt))
+  b<-which(df3$items.snippet.totalReplyCount>0,arr.ind=TRUE)
+  for(i in seq_along(b)){
+    if(i==1){
+      df5<-data.frame()}
+    df5<- dplyr::bind_rows(df5,data.frame(df3$items.replies.comments[b[i]]));
+  }
+  #df5<-dplyr::mutate(df5,publishedAt=lubridate::ymd_hms(snippet.publishedAt))
+  df<-dplyr::full_join(df3,df5)
+  #df<-dplyr::select(df,-c(1:5))
+  return(df)
+}
+get_channelids <- function(channelname,key) {
+  url <- paste0("https://www.googleapis.com/youtube/v3/search?part=snippet&q=",
+                sprintf("%s",channelname),
+                "&type=channel&key=",
+                sprintf("%s", key))
+  df1 <- httr::GET(paste0(url))
+  df2 <- httr::content(df1, "text")
+  df <- jsonlite::fromJSON(df2, flatten = TRUE)
+  df <- data.frame(df)
+  df <- dplyr::tbl_df(df)
+  #rm(df1,df2)
+  return(df)
+}
+
+get_all_videodata<-function(x,key){
+  n<-length(x$items.snippet.resourceId.videoId)
+  for(i in 1:n){
+    if(i==1)
+      df<-dplyr::tbl_df(get_video_data(x$items.snippet.resourceId.videoId[i],key));
+    if(i>1){
+      df1<-dplyr::tbl_df(get_video_data(x$items.snippet.resourceId.videoId[i],key));
+      df<-dplyr::bind_rows(df,df1);
+    }
+    print(paste(round(((100/n)*i), digits = 2),"% scraping DONE"))
+  }
+  #i=i+1
+  #df<-dplyr::mutate(df,items.snippet.publishedAt=lubridate::ymd_hms(items.snippet.publishedAt))
+  return(df)
+}
+
+clean.corpus<-function(corpus,custom.stopwords){
+  corpus <- tm::tm_map(corpus, tm::removePunctuation)
+  corpus <- tm::tm_map(corpus, tm::stripWhitespace)
+  corpus <- tm::tm_map(corpus, tm::removeNumbers)
+  corpus <- tm::tm_map(corpus, tm::content_transformer(tryTolower))
+  corpus <- tm::tm_map(corpus, tm::removeWords, custom.stopwords)
+  return(corpus)
+}
+tryTolower <- function(x){
+  # return NA when there is an error
+  y = NA
+  # tryCatch error
+  try_error = tryCatch(tolower(x), error = function(e) e)
+  # if not an error
+  if (!inherits(try_error, 'error'))
+    y = tolower(x)
+  return(y)
+}
+trim_df<-function(df){
+  df<-select(df,
+             -c(kind,
+                etag,
+                pageInfo.totalResults,
+                pageInfo.resultsPerPage,
+                items.kind,
+                items.snippet.videoId,
+                items.snippet.canReply,
+                items.snippet.isPublic,
+                items.replies.comments,
+                snippet.canRate,
+                items.snippet.topLevelComment.kind))
+
+  #authorDisplayName
+  d<-unlist(select(df,ends_with("authorDisplayName")))
+  d<-d[!is.na(d)]
+  if(length(d)==dim(df)[1]){
+  df<-select(df,-ends_with("authorDisplayName"))
+  df$authorDisplayName<-d}
+
+  #authorProfileImageUrl
+  d<-unlist(select(df,ends_with("authorProfileImageUrl")))
+  d<-d[!is.na(d)]
+  if(length(d)==dim(df)[1]){
+  df<-select(df,-ends_with("authorProfileImageUrl"))
+  df$authorProfileImageUrl<-d}
+
+  #authorChannelUrl
+  d<-unlist(select(df,ends_with("authorChannelUrl")))
+  d<-d[!is.na(d)]
+  if(length(d)==dim(df)[1]){
+  df<-select(df,-ends_with("authorChannelUrl"))
+  df$authorChannelUrl<-d}
+
+  #textDisplay
+  d<-unlist(select(df,ends_with("textDisplay")))
+  d<-d[!is.na(d)]
+  if(length(d)==dim(df)[1]){
+  df<-select(df,-ends_with("textDisplay"))
+  df$textDisplay<-d}
+
+  #videoId
+  d<-unlist(select(df,ends_with("videoId")))
+  d<-d[!is.na(d)]
+  if(length(d)==dim(df)[1]){
+  df<-select(df,-ends_with("videoId"))
+  df$videoId<-d}
+
+  #likeCount
+  d<-unlist(select(df,ends_with("likeCount")))
+  d<-d[!is.na(d)]
+  df<-select(df,-ends_with("likeCount"))
+  df$likeCount<-d
+
+  #publishedAt
+  d<-unlist(select(df,ends_with("publishedAt")))
+  d<-d[!is.na(d)]
+  if(length(d)==dim(df)[1]){
+  df<-select(df,-ends_with("publishedAt"))
+  df$publishedAt<-d}
+
+  #updatedAt
+  d<-unlist(select(df,ends_with("updatedAt")))
+  d<-d[!is.na(d)]
+  if(length(d)==dim(df)[1]){
+  df<-select(df,-ends_with("updatedAt"))
+  df$updatedAt<-d}
+
+  #canRate
+  d<-unlist(select(df,ends_with("canRate")))
+  d<-d[!is.na(d)]
+  if(length(d)==dim(df)[1]){
+  df<-select(df,-ends_with("canRate"))
+  df$canRate<-d}
+
+  #viewerRating
+  d<-unlist(select(df,ends_with("viewerRating")))
+  d<-d[!is.na(d)]
+  if(length(d)==dim(df)[1]){
+  df<-select(df,-ends_with("viewerRating"))
+  df$viewerRating<-d}
+
+  return(df)
+
+}
+
+rename_colnames<-function(df){
+  names(df) <- gsub("\\.","_", names(df) )
+  names(df) <- gsub("pageInfo_","", names(df) )
+  names(df) <- gsub("items_snippet_","", names(df) )
+  names(df) <- gsub("items_contentdetails_","", names(df) )
+  names(df) <- gsub("items_statistics_","", names(df) )
+  names(df)<- tolower(names(df))
+  return(df)
+}
+minimal_df<-function(df){
+  df1<-trim_df(df)
+  df2<-dplyr::select(df1,matches("totalReplyCount|authorChannelId.value|authorDisplayName|textDisplay|likeCount|publishedAt"))
+  return(df2)
+}
+get_videoids_single_playlist<- function(uploads, key){
+  nextPageToken <- ""
+  i<-1;
+  repeat{
+    url <- paste0("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&pageToken=",
+                  sprintf("%s", nextPageToken),
+                  "&playlistId=",
+                  sprintf("%s", unlist(uploads)),
+                  "&key=",
+                  sprintf("%s", key))
+    df1<-httr::GET(paste0(url))
+    df2<-httr::content(df1, "text")
+    if(i>1){
+      df3<- dplyr::tbl_df(dplyr::bind_rows(data.frame(jsonlite::fromJSON(df2, flatten = TRUE)),df3))}
+    if(i==1){
+      df3 <- dplyr::tbl_df(data.frame(jsonlite::fromJSON(df2, flatten = TRUE)))
+    }
+    if(unique(df3$pageInfo.totalResults)>50){
+      nextPageToken <- as.character(df3$nextPageToken[1])
+      if(is.na(nextPageToken)==TRUE)
+        break;
+    }else{
+      break;
+    }
+
+    i=i+1
+  }
+  #df<-dplyr::mutate(df,items.snippet.publishedAt=lubridate::ymd_hms(items.snippet.publishedAt))
+  return(df3)
+}
+get_videoids_multiple_playlists<- function(getplaylist_df, key){
+  i<-1;
+  while(i<dim(getplaylist_df)[1]){
+    if(i==1){
+      df0<-get_videoids_single_playlist(getplaylist_df$items.id[i],key)
+    }else{
+      df<-get_videoids_single_playlist(getplaylist_df$items.id[i],key)
+      df0<-dplyr::bind_rows(df0,df)
+    }
+    print(dim(getplaylist_df)[1]-i)
+    print("loops remains")
+    i=i+1
+  }
+  df0<-dplyr::filter (df0,!duplicated(items.snippet.resourceId.videoId))
+  return(df0)
+}
+get_video_data <- function(videoId, key){
+  #videoId<-"3bf0cvuZiCk"
+  url <- paste0("https://www.googleapis.com/youtube/v3/videos?part=snippet%2Cstatistics%2CcontentDetails&id=",
+                sprintf("%s",videoId),
+                "&maxResults=50&key=",
+                sprintf("%s", key))
+  df1 <- httr::GET(paste0(url))
+  df2 <- httr::content(df1, "text")
+  df <- jsonlite::fromJSON(df2, flatten = TRUE)
+  if(df$pageInfo$totalResults!=0){
+    df<-dplyr::tbl_df(data.frame(df))
+  }else{
+    df<-dplyr::tbl_df(data.frame())
+  }
+  #df<-dplyr::mutate(df,items.snippet.publishedAt=lubridate::ymd_hms(items.snippet.publishedAt))
+  #rm(df1,df2)
+  return(df)
+}
+get_playlists<-function(channelid,key){
+  nextPageToken=""
+  i=1;
+  repeat{
+    url <- unique(paste0("https://www.googleapis.com/youtube/v3/playlists?part=snippet&channelId=",
+                         sprintf("%s", channelid),
+                         "&key=",
+                         sprintf("%s", key),
+                         "&pageToken=",
+                         sprintf("%s", nextPageToken)))
+    df1<-httr::GET(paste0(url))
+    df2<-httr::content(df1, "text")
+    if(i>1){
+      df3<- dplyr::tbl_df(dplyr::bind_rows(data.frame(jsonlite::fromJSON(df2, flatten = TRUE)),df3))}
+    if(i==1){
+      df3 <- dplyr::tbl_df(data.frame(jsonlite::fromJSON(df2, flatten = TRUE)))
+    }
+    nextPageToken <- as.character(df3$nextPageToken[1])
+    if(is.na(nextPageToken)==TRUE)
+      break;
+    i=i+1
+  }
+  return(df3)
+}
+get_playlists<-function(channelid,key){
+  nextPageToken=""
+  i=1;
+  repeat{
+    url <- unique(paste0("https://www.googleapis.com/youtube/v3/playlists?part=snippet&channelId=",
+                         sprintf("%s", channelid),
+                         "&key=",
+                         sprintf("%s", key),
+                         "&pageToken=",
+                         sprintf("%s", nextPageToken)))
+    df1<-httr::GET(paste0(url))
+    df2<-httr::content(df1, "text")
+    if(i>1){
+      df3<- dplyr::tbl_df(dplyr::bind_rows(data.frame(jsonlite::fromJSON(df2, flatten = TRUE)),df3))}
+    if(i==1){
+      df3 <- dplyr::tbl_df(data.frame(jsonlite::fromJSON(df2, flatten = TRUE)))
+    }
+    nextPageToken <- as.character(df3$nextPageToken[1])
+    if(is.na(nextPageToken)==TRUE)
+      break;
+    i=i+1
+  }
+  return(df3)
+}
+get_language<-function(df){
+  df$language <- textcat::textcat(gcd$textDisplay)
+  return(df)
+}
+get_gender<-function(df,col,split,sepby,method){
+  names(df)[names(df) == paste(col)] <- 'name'
+  #convert Non_ASCII from the name coloumn
+  df$name<-stringi::stri_trans_general(df$name, "en-ascii")
+  #removing non-ascii charecter
+  df$name<-gsub("[^[:alpha:][:space:]]*", "", df$name)
+  #removing whitespace
+  df$name<-tm::stripWhitespace(df$name)
+  if(split=="TRUE"){
+    df<-tidyr::separate(df,name, into = c("first", "last"), sep = paste(sepby),remove=F);
+  }else{
+    names(df)[names(df) == 'name'] <- 'first'
+  }
+  first<-df$first
+  gender<-gender::gender(first, method = paste(method))
+  names(gender)[names(gender) == 'name'] <- 'first'
+  gender<-dplyr::filter (gender,!duplicated(first))
+  gender<-dplyr::filter(gender,gender!="NA")
+  df<-merge(x = df, y = gender, by = "first", all.x = TRUE)
+  return(df)
+}
+
+get_fbshare <- function(videoId)
+{
+  fqlQuery <- "select share_count,like_count,comment_count from link_stat where url=\""
+  url <- "https://www.youtube.com/watch?v="
+  url <- paste(url, videoId, sep = "")
+  queryUrl <- paste0("http://graph.facebook.com/fql?q=", fqlQuery, url, "\"")
+  lookUp <- URLencode(queryUrl)
+  rd <- readLines(lookUp, warn = "F")
+  data <- rjson::fromJSON(rd)
+  data <- as.data.frame(data)
+  names(data) <- c("ShareCount", "LikeCount", "CommentCount")
+  data$ShareCount <- as.numeric(as.character(data$ShareCount))
+  data$LikeCount <- as.numeric(as.character(data$LikeCount))
+  data$CommentCount <- as.numeric(as.character(data$CommentCount))
+  data<-data.frame(data)
+  data<-dplyr::tbl_df(data)
+  return(data)
+}
+
+get_comments<-function(videoId,key,nextPageToken=""){
+  nextPageToken=""
+  i=1;
+  repeat{
+    url <- unique(paste0("https://www.googleapis.com/youtube/v3/commentThreads?part=snippet%2Creplies&maxResults=100&pageToken=",
+                         sprintf("%s", nextPageToken),
+                         "&videoId=",
+                         sprintf("%s", videoId),
+                         "&key=",
+                         sprintf("%s", key)))
+    df1<-httr::GET(paste0(url))
+    df2<-httr::content(df1, "text")
+    if(i>1){
+      df3<- dplyr::tbl_df(dplyr::bind_rows(data.frame(jsonlite::fromJSON(df2, flatten = TRUE)),df3))}
+    if(i==1){
+      df3 <- dplyr::tbl_df(data.frame(jsonlite::fromJSON(df2, flatten = TRUE)))
+    }
+    nextPageToken <- as.character(df3$nextPageToken[1])
+    if(is.na(nextPageToken)==TRUE)
+      break;
+    i=i+1
+  }
+  #df4<-dplyr::mutate(df3,publishedAt=lubridate::ymd_hms(items.snippet.topLevelComment.snippet.publishedAt))
+  b<-which(df3$items.snippet.totalReplyCount>0,arr.ind=TRUE)
+  for(i in seq_along(b)){
+    if(i==1){
+      df5<-data.frame()}
+    df5<- dplyr::bind_rows(df5,data.frame(df3$items.replies.comments[b[i]]));
+  }
+  #df5<-dplyr::mutate(df5,publishedAt=lubridate::ymd_hms(snippet.publishedAt))
+  df<-dplyr::full_join(df3,df5)
+  #df<-dplyr::select(df,-c(1:5))
+  return(df)
+}
+get_channelids <- function(channelname,key) {
+  url <- paste0("https://www.googleapis.com/youtube/v3/search?part=snippet&q=",
+                sprintf("%s",channelname),
+                "&type=channel&key=",
+                sprintf("%s", key))
+  df1 <- httr::GET(paste0(url))
+  df2 <- httr::content(df1, "text")
+  df <- jsonlite::fromJSON(df2, flatten = TRUE)
+  df <- data.frame(df)
+  df <- dplyr::tbl_df(df)
+  #rm(df1,df2)
+  return(df)
+}
+
+get_all_videodata<-function(x,key){
+  n<-length(x$items.snippet.resourceId.videoId)
+  for(i in 1:n){
+    if(i==1)
+      df<-dplyr::tbl_df(get_video_data(x$items.snippet.resourceId.videoId[i],key));
+    if(i>1){
+      df1<-dplyr::tbl_df(get_video_data(x$items.snippet.resourceId.videoId[i],key));
+      df<-dplyr::bind_rows(df,df1);
+    }
+    print(paste(round(((100/n)*i), digits = 2),"% scraping DONE"))
+  }
+  #i=i+1
+  #df<-dplyr::mutate(df,items.snippet.publishedAt=lubridate::ymd_hms(items.snippet.publishedAt))
+  return(df)
+}
+
+clean.corpus<-function(corpus,custom.stopwords){
+  corpus <- tm::tm_map(corpus, tm::removePunctuation)
+  corpus <- tm::tm_map(corpus, tm::stripWhitespace)
+  corpus <- tm::tm_map(corpus, tm::removeNumbers)
+  corpus <- tm::tm_map(corpus, tm::content_transformer(tryTolower))
+  corpus <- tm::tm_map(corpus, tm::removeWords, custom.stopwords)
+  return(corpus)
+}
+
+```
+
